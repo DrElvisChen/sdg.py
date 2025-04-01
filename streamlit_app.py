@@ -3,9 +3,6 @@ import pandas as pd
 import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
 import re
 
 # Set page configuration
@@ -197,7 +194,7 @@ def create_dashboard(df):
             margin=dict(l=0, r=10, t=10, b=0),
         )
 
-        st.plotly_chart(fig_bar, use_container_width=True)
+        st.plotly_chart(fig_bar, use_container_width=True, key="main_sdg_bar_chart")
 
     # Department vs SDG Heatmap Tab
     with tabs[1]:
@@ -234,11 +231,47 @@ def create_dashboard(df):
                               step=1)
             df_heatmap_filtered = df_heatmap.head(top_n)
 
-            # Display the table with totals
+            # Display the table with color gradient
             st.markdown("### 科系 SDG 課程數據表格")
+
+            # Define function to create a monochromatic color gradient background for cells
+            def color_gradient(val):
+                """
+                Create a single-color gradient for the table based on the value.
+                Uses a light blue color scheme where higher values have darker shades.
+                """
+                if pd.isna(val) or val == 0:
+                    return 'background-color: #f9f9f9'  # Very light grey for zero values
+
+                # Get max value for SDG columns to normalize
+                sdg_cols = [col for col in df_heatmap_filtered.columns if col.startswith('SDG')]
+                max_val = df_heatmap_filtered[sdg_cols].max().max()
+
+                # Normalize value (0-1)
+                normalized = val / max_val if max_val > 0 else 0
+
+                # Create a monochromatic blue color scheme
+                # Light blue (low values) to slightly darker blue (high values)
+                # Starting with a very light blue: rgb(235, 245, 255)
+                # Going to a medium-light blue: rgb(180, 215, 255)
+
+                # Calculate the color - single hue with varying intensity
+                r = int(235 - (normalized * 55))  # 235 to 180
+                g = int(245 - (normalized * 30))  # 245 to 215
+                b = 255  # Keep blue at max
+
+                # Return the color as a background style with the value in bold for non-zero cells
+                color = f'rgb({r}, {g}, {b})'
+                text_color = 'black'  # Always using black text for better contrast with light backgrounds
+
+                return f'background-color: {color}; color: {text_color}; font-weight: {"bold" if val > 0 else "normal"}'
+
+            # Apply styling to SDG columns only
+            sdg_cols = [col for col in df_heatmap_filtered.columns if col.startswith('SDG')]
+            styled_df = df_heatmap_filtered.style.applymap(color_gradient, subset=sdg_cols)
+
             # Make the table sortable by clicking on column headers
-            st.dataframe(df_heatmap_filtered.style.highlight_max(axis=0, subset=[f'SDG{i}' for i in range(1, 18)]),
-                         height=600)
+            st.dataframe(styled_df, height=600)
         else:
             st.error("找不到科系欄位，無法建立科系 SDG 分佈表")
 
@@ -308,7 +341,7 @@ def create_dashboard(df):
             )
 
             fig_bar_stats.update_layout(xaxis_tickangle=-45)
-            st.plotly_chart(fig_bar_stats, use_container_width=True)
+            st.plotly_chart(fig_bar_stats, use_container_width=True, key="sdg_stats_bar_chart")
 
         with col2:
             st.markdown("### SDG 課程佔比分佈")
@@ -323,7 +356,7 @@ def create_dashboard(df):
             )
 
             fig_pie_stats.update_layout(height=400)
-            st.plotly_chart(fig_pie_stats, use_container_width=True)
+            st.plotly_chart(fig_pie_stats, use_container_width=True, key="sdg_stats_pie_chart")
 
         # Display courses with multiple SDGs
         st.markdown("### 多重 SDG 課程分析")
@@ -346,7 +379,7 @@ def create_dashboard(df):
             bargap=0.2
         )
 
-        st.plotly_chart(fig_hist, use_container_width=True)
+        st.plotly_chart(fig_hist, use_container_width=True, key="sdg_count_histogram")
 
     # Data Exploration Tab
     with tabs[3]:
@@ -415,12 +448,14 @@ def create_dashboard(df):
             filtered_df = filtered_df[filtered_df['開課年度'].isin(selected_years)]
 
         # Display filtered data
+        available_columns = df.columns.tolist()
+        default_columns = ['課程名稱', '科系', '開課年度', '課程大綱', 'final SDGs']
+        default_columns = [col for col in default_columns if col in available_columns]
+
         selected_columns = st.multiselect(
             "選擇顯示欄位",
-            options=df.columns.tolist(),
-            default=['課程名稱', '科系', '開課老師', '學分數', 'final SDGs'] if all(
-                col in df.columns for col in ['課程名稱', '科系', '開課老師', '學分數', 'final SDGs']) else df.columns[
-                                                                                                            :5].tolist()
+            options=available_columns,
+            default=default_columns if default_columns else available_columns[:5]
         )
 
         if not selected_columns:
@@ -474,7 +509,7 @@ def create_dashboard(df):
                 xaxis_title="SDG編號"
             )
 
-            st.plotly_chart(fig_bar, use_container_width=True)
+            st.plotly_chart(fig_bar, use_container_width=True, key="filtered_sdg_bar_chart")
 
             # Table 2: Sum of total SDGs after selection
             total_sdg_courses = filtered_df_sdg['Count'].sum()
@@ -490,7 +525,6 @@ def create_dashboard(df):
                 ]
             })
 
-
             st.markdown("#### SDG 課程分佈圖")
             fig_pie = px.pie(
                 filtered_df_sdg[filtered_df_sdg['Count'] > 0],
@@ -505,7 +539,8 @@ def create_dashboard(df):
                 height=500
             )
 
-            st.plotly_chart(fig_pie, use_container_width=True)
+            st.plotly_chart(fig_pie, use_container_width=True, key="filtered_sdg_pie_chart")
+
 
 # If a file is uploaded, process it
 if uploaded_file is not None:
@@ -526,9 +561,7 @@ else:
     st.info("""
     請上傳包含以下欄位的 Excel 文件:
 
-    建立時間, 開課年度, 開課學期, 名稱, 級別, 名校名, 課程名稱, 科系, 科系英文名稱, 學程, 年級, 開課老師, 學分數,
-    課程大綱, 課程連結, 備註, 男學生修課人數, 女學生修課人數, 其他學生修課人數, 部別_學制, 學程_部, 校訂_半全年,
-    科目類別, 教學型態, 必選修, 全英語教學, 跨校選修, 系科屬性, 總修課人數, 授課語言, 課號, final SDGs
+    開課年度, 課程名稱, 科系, 課程大綱, final SDGs
 
     其中 'final SDGs' 欄位是必須的，它應該包含格式如 "SDG1, SDG3, SDG4" 的數據。
     """)
@@ -536,12 +569,11 @@ else:
     # Create a sample dataframe for demonstration
     st.markdown("### 範例數據")
     sample_data = {
-        '建立時間': ['2023-09-01', '2023-09-01', '2023-09-01'],
         '開課年度': [113, 113, 113],
         '課程名稱': ['永續發展導論', '環境科學概論', '企業社會責任'],
         '科系': ['通識教育中心', '環境工程系', '企業管理系'],
-        '開課老師': ['王老師', '李老師', '張老師'],
-        '學分數': [2, 3, 3],
+        '課程大綱': ['本課程介紹永續發展的基本概念與原則...', '本課程探討環境科學的基礎理論與應用...',
+                     '本課程探討企業在社會中的責任與角色...'],
         'final SDGs': ['SDG4, SDG17', 'SDG6, SDG13, SDG14, SDG15', 'SDG8, SDG12']
     }
     sample_df = pd.DataFrame(sample_data)
